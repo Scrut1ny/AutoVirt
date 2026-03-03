@@ -55,6 +55,31 @@ system_info() {
         break
     done
 
+    # HardDisk selection
+    local hdd_choice
+    while :; do
+        fmtr::log "HardDisk allocation:
+
+  1) 500 GiB
+  2) 250 GiB
+  3) 100 GiB
+  4) 50 GiB (for testing)"
+
+        read -r -p "$(fmtr::ask_inline "Choose an option [1-4]: ")" hdd_choice
+        printf '%s\n' "$hdd_choice" >>"$LOG_FILE"
+
+        case "$hdd_choice" in
+            1) HOST_HDD_GIB=500  ;;
+            2) HOST_HDD_GIB=250 ;;
+            3) HOST_HDD_GIB=100 ;;
+            4) HOST_HDD_GIB=50 ;;
+            *) fmtr::warn "Invalid option. Please choose 1–6."; continue ;;
+        esac
+
+        fmtr::info "Selected #$hdd_choice ($HOST_HDD_GIB GiB)"
+        break
+    done
+
     # ISO Selection
     DOWNLOADS_DIR="/home/$USER/Downloads"
     ISO_PATH=""
@@ -429,7 +454,7 @@ configure_xml() {
         # --disk type=block,device=disk,source=/dev/nvme0n1,driver.name=qemu,driver.type=raw,driver.cache=none,driver.io=native,target.dev=nvme0,target.bus=nvme,serial=1233659 \
 
         # set & spoof eui64
-        --disk "size=500,bus=nvme,serial=$DRIVE_SERIAL,driver.cache=none,driver.io=native,driver.discard=unmap,blockio.logical_block_size=4096,blockio.physical_block_size=4096"
+        --disk "size=$HOST_HDD_GIB,bus=nvme,serial=$DRIVE_SERIAL,driver.cache=none,driver.io=native,driver.discard=unmap,blockio.logical_block_size=4096,blockio.physical_block_size=4096"
         --check "disk_size=off"
 
         --cdrom "$ISO_PATH"
