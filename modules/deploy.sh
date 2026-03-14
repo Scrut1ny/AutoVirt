@@ -162,6 +162,14 @@ configure_xml() {
 
         case "$enable_hyperv" in
             [Yy]*)
+                #INTEL nested check, TODO for amd
+                if [[ $(cat /sys/module/kvm_intel/parameters/nested) == "N" ]]; then
+                    fmtr::warn "cant use Hyper-V on non nested device"
+                    fmtr::warn "Please enable nested and retry:"
+                    fmtr::warn "modprobe -r kvm_intel"
+                    fmtr::warn "modprobe kvm_intel nested=1"
+                    continue
+                fi
                 HYPERV_ARGS=('--xml' "./features/hyperv/@mode=passthrough")
                 HYPERV_CLOCK_STATUS="yes"
                 CPU_FEATURE_HYPERVISOR="optional"
