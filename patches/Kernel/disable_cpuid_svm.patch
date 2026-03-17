@@ -1,0 +1,47 @@
+diff --git a/arch/x86/kvm/svm/svm.c b/arch/x86/kvm/svm/svm.c
+index e6477affac9a..3d9736a9c8da 100644
+--- a/arch/x86/kvm/svm/svm.c
++++ b/arch/x86/kvm/svm/svm.c
+@@ -172,6 +172,9 @@ module_param(vnmi, bool, 0444);
+ 
+ module_param(enable_mediated_pmu, bool, 0444);
+ 
++static bool disable_cpuid_intercept = false;
++module_param(disable_cpuid_intercept, bool, 0644);
++
+ static bool svm_gp_erratum_intercept = true;
+ 
+ static u8 rsm_ins_bytes[] = "\x0f\xaa";
+@@ -3229,6 +3232,14 @@ static int bus_lock_exit(struct kvm_vcpu *vcpu)
+ 	return 0;
+ }
+ 
++static int cpuid_interception(struct kvm_vcpu *vcpu)
++{
++	if (unlikely(disable_cpuid_intercept)) {
++		svm_clr_intercept(to_svm(vcpu), INTERCEPT_CPUID);
++	}
++	return kvm_emulate_cpuid(vcpu);
++}
++
+ static int (*const svm_exit_handlers[])(struct kvm_vcpu *vcpu) = {
+ 	[SVM_EXIT_READ_CR0]			= cr_interception,
+ 	[SVM_EXIT_READ_CR3]			= cr_interception,
+@@ -3267,7 +3278,7 @@ static int (*const svm_exit_handlers[])(struct kvm_vcpu *vcpu) = {
+ 	[SVM_EXIT_SMI]				= smi_interception,
+ 	[SVM_EXIT_VINTR]			= interrupt_window_interception,
+ 	[SVM_EXIT_RDPMC]			= kvm_emulate_rdpmc,
+-	[SVM_EXIT_CPUID]			= kvm_emulate_cpuid,
++	[SVM_EXIT_CPUID]			= cpuid_interception,
+ 	[SVM_EXIT_IRET]                         = iret_interception,
+ 	[SVM_EXIT_INVD]                         = kvm_emulate_invd,
+ 	[SVM_EXIT_PAUSE]			= pause_interception,
+@@ -5090,6 +5101,8 @@ static void svm_vm_destroy(struct kvm *kvm)
+ 
+ static int svm_vm_init(struct kvm *kvm)
+ {
++	disable_cpuid_intercept = false;
++
+ 	int type = kvm->arch.vm_type;
+ 
+ 	if (type != KVM_X86_DEFAULT_VM &&
