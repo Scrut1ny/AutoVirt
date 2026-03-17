@@ -56,7 +56,7 @@ system_info() {
     done
 
     # ISO Selection
-    DOWNLOADS_DIR="/home/$USER/Downloads"
+    DOWNLOADS_DIR="/var/lib/libvirt/images/"
     ISO_PATH=""
 
     ensure_permissions() {
