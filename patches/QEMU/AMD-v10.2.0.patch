@@ -313,7 +313,7 @@ index 18f482c..6679592 100644
      set_bit(DEVICE_CATEGORY_DISPLAY, dc->categories);
      device_class_set_legacy_reset(dc, qxl_reset_handler);
 diff --git a/hw/display/vga-pci.c b/hw/display/vga-pci.c
-index b81f7fd..0a741ee 100644
+index b81f7fd..c7ea6d5 100644
 --- a/hw/display/vga-pci.c
 +++ b/hw/display/vga-pci.c
 @@ -259,7 +259,7 @@ static void pci_std_vga_realize(PCIDevice *dev, Error **errp)
@@ -338,7 +338,7 @@ index b81f7fd..0a741ee 100644
      k->realize = pci_std_vga_realize;
      k->romfile = "vgabios-stdvga.bin";
      k->class_id = PCI_CLASS_DISPLAY_VGA;
-+    k->revision = 0xc5; // AMD addition 
++    k->revision = 0xc5; // AMD addition
      device_class_set_props(dc, vga_pci_properties);
      dc->hotpluggable = false;
  
@@ -540,7 +540,7 @@ index 9446a9f..f354b28 100644
  
  /*
   *   IVRS table as specified in AMD IOMMU Specification v2.62, Section 5.2
-@@ -2076,8 +2204,9 @@ void acpi_build(AcpiBuildTables *tables, MachineState *machine)
+@@ -2076,8 +2203,9 @@ void acpi_build(AcpiBuildTables *tables, MachineState *machine)
                         x86ms->oem_id, x86ms->oem_table_id, &pcms->cxl_devices_state);
      }
  
@@ -1360,7 +1360,7 @@ index f38e129..e346f2d 100644
  #define ACPI_BUILD_TABLE_FILE "etc/acpi/tables"
  #define ACPI_BUILD_RSDP_FILE "etc/acpi/rsdp"
 diff --git a/include/hw/pci/pci.h b/include/hw/pci/pci.h
-index b72e484..a9e62f9 100644
+index b72e484..01edc0a 100644
 --- a/include/hw/pci/pci.h
 +++ b/include/hw/pci/pci.h
 @@ -57,12 +57,12 @@ extern bool pci_available;
@@ -1547,3 +1547,40 @@ index 9c25b55..af64a32 100644
      { "x2apic", "on" },
      { "kvm-msi-ext-dest-id", "off" },
      { "acpi", "off" },
+diff --git a/target/i386/kvm/kvm.c b/target/i386/kvm/kvm.c
+index 60c7981..6b2ecaf 100644
+--- a/target/i386/kvm/kvm.c
++++ b/target/i386/kvm/kvm.c
+@@ -3252,6 +3252,20 @@ static int kvm_vm_enable_energy_msrs(KVMState *s)
+     return 0;
+ }
+ 
++static int kvm_vm_disable_hypercall_patching(KVMState *s)
++{
++    int valid_quirks = kvm_vm_check_extension(s, KVM_CAP_DISABLE_QUIRKS2);
++
++    if (valid_quirks & KVM_X86_QUIRK_FIX_HYPERCALL_INSN)
++    {
++        return kvm_vm_enable_cap(s, KVM_CAP_DISABLE_QUIRKS2, 0,
++                                 KVM_X86_QUIRK_FIX_HYPERCALL_INSN);
++    }
++
++    warn_report("kvm: disabling hypercall patching not supported");
++    return 0;
++}
++
+ int kvm_arch_init(MachineState *ms, KVMState *s)
+ {
+     int ret;
+@@ -3390,6 +3404,11 @@ int kvm_arch_init(MachineState *ms, KVMState *s)
+         }
+     }
+ 
++    if (kvm_vm_disable_hypercall_patching(s))
++    {
++        warn_report("kvm: failed to disable hypercall patching quirk");
++    }
++
+     return 0;
+ }
+ 

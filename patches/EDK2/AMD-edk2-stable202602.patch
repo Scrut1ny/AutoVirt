@@ -133,7 +133,7 @@ index 6feca83..aca4439 100644
    },{
      PCI_CLASS_DISPLAY_VGA,
 -    0x1b36,
-+    0x1002, // 0x1b36,
++    0x1022, // 0x1b36,
      0x0100,
      QEMU_VIDEO_BOCHS,
      L"QEMU QXL VGA"
