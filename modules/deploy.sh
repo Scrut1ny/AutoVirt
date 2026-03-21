@@ -2,6 +2,21 @@
 
 source ./utils.sh || { echo "Failed to load utilities module!"; exit 1; }
 
+readonly OUT_DIR="/opt/AutoVirt"
+readonly SMBIOS_SCRIPT="$(pwd)/resources/scripts/Linux/SMBIOS.py"
+
+# Debug helper — prints variable name + value when DEBUG=1
+dbg::var() {
+    [[ "${DEBUG:-0}" == "1" ]] || return 0
+    local name=$1 val=$2
+    fmtr::info "[DEBUG] $name = '$val'"
+}
+
+dbg::step() {
+    [[ "${DEBUG:-0}" == "1" ]] || return 0
+    fmtr::info "[DEBUG] $*"
+}
+
 system_info() {
     # Domain Name
     DOMAIN_NAME="AutoVirt"
@@ -11,14 +26,46 @@ system_info() {
     HOST_CORES_PER_SOCKET=$(LC_ALL=C lscpu | sed -n 's/^Core(s) per socket:[[:space:]]*//p')
     HOST_THREADS_PER_CORE=$(LC_ALL=C lscpu | sed -n 's/^Thread(s) per core:[[:space:]]*//p')
 
-    # MAC Address (Uses host's OUI)
-    UPLINK_IFACE=$(nmcli -t device show | awk -F: '
-    /^GENERAL.DEVICE/ {dev=$2}
-    /^GENERAL.TYPE/   {type=$2}
-    /^IP4.GATEWAY/ && $2!="" && type!="wireguard" {print dev; exit}
-    ')
-    OUI=$(cat /sys/class/net/"$UPLINK_IFACE"/address | awk -F: '{print $1 ":" $2 ":" $3}')
+    dbg::step "Detecting CPU topology..."
+    dbg::var "HOST_LOGICAL_CPUS" "$HOST_LOGICAL_CPUS"
+    dbg::var "HOST_CORES_PER_SOCKET" "$HOST_CORES_PER_SOCKET"
+    dbg::var "HOST_THREADS_PER_CORE" "$HOST_THREADS_PER_CORE"
+
+    # Validate CPU topology values
+    if [[ -z "$HOST_CORES_PER_SOCKET" || -z "$HOST_THREADS_PER_CORE" ]]; then
+        fmtr::error "Failed to detect CPU topology (cores=$HOST_CORES_PER_SOCKET, threads=$HOST_THREADS_PER_CORE)."
+        fmtr::error "Falling back to: 1 socket, $HOST_LOGICAL_CPUS cores, 1 thread."
+        HOST_CORES_PER_SOCKET="$HOST_LOGICAL_CPUS"
+        HOST_THREADS_PER_CORE="1"
+    fi
+
+    # MAC Address (Uses host's OUI with fallback)
+    dbg::step "Detecting network interface for MAC OUI..."
+    UPLINK_IFACE=""
+    if command -v nmcli &>/dev/null; then
+        UPLINK_IFACE=$(nmcli -t device show 2>/dev/null | awk -F: '
+        /^GENERAL.DEVICE/ {dev=$2}
+        /^GENERAL.TYPE/   {type=$2}
+        /^IP4.GATEWAY/ && $2!="" && type!="wireguard" {print dev; exit}
+        ')
+        dbg::var "UPLINK_IFACE (nmcli)" "$UPLINK_IFACE"
+    fi
+
+    # Fallback: use ip route to find default interface
+    if [[ -z "$UPLINK_IFACE" ]]; then
+        dbg::step "nmcli failed or unavailable, trying 'ip route' fallback..."
+        UPLINK_IFACE=$(ip route show default 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="dev") print $(i+1)}' | head -1)
+        dbg::var "UPLINK_IFACE (ip route)" "$UPLINK_IFACE"
+    fi
+
+    if [[ -n "$UPLINK_IFACE" && -f "/sys/class/net/$UPLINK_IFACE/address" ]]; then
+        OUI=$(cat /sys/class/net/"$UPLINK_IFACE"/address | awk -F: '{print $1 ":" $2 ":" $3}')
+    else
+        fmtr::warn "Could not detect network interface. Using random OUI for MAC address."
+        OUI=$(printf '%02x:%02x:%02x' $((RANDOM%256)) $((RANDOM%256)) $((RANDOM%256)))
+    fi
     RANDOM_MAC="$OUI:$(printf '%02x:%02x:%02x' $((RANDOM%256)) $((RANDOM%256)) $((RANDOM%256)))"
+    dbg::var "RANDOM_MAC" "$RANDOM_MAC"
 
     # Random 20-char hex serial (A-F0-9)
     DRIVE_SERIAL="$(LC_ALL=C tr -dc 'A-F0-9' </dev/urandom | head -c 20)"
@@ -140,13 +187,129 @@ system_info() {
         WIN_VERSION="win10"
     fi
     fmtr::info "Detected Windows ISO version: $WIN_VERSION"
+    dbg::var "WIN_VERSION" "$WIN_VERSION"
+    dbg::var "DRIVE_SERIAL" "$DRIVE_SERIAL"
+    dbg::var "ISO_PATH" "$ISO_PATH"
+}
+
+# Generate smbios.bin from host firmware tables
+generate_smbios() {
+    local target="$OUT_DIR/firmware/smbios.bin"
+
+    if [[ -f "$target" ]]; then
+        fmtr::info "smbios.bin already exists at $target"
+        return 0
+    fi
+
+    if [[ ! -f "$SMBIOS_SCRIPT" ]]; then
+        fmtr::error "SMBIOS.py script not found at: $SMBIOS_SCRIPT"
+        fmtr::error "Cannot generate smbios.bin — VM may be detectable as virtual."
+        return 1
+    fi
+
+    if ! command -v python3 &>/dev/null; then
+        fmtr::error "python3 not found — cannot generate smbios.bin"
+        return 1
+    fi
+
+    fmtr::info "Generating smbios.bin from host firmware tables..."
+    local tmpdir
+    tmpdir=$(mktemp -d) || { fmtr::error "Failed to create temp directory"; return 1; }
+
+    if (cd "$tmpdir" && $ROOT_ESC python3 "$SMBIOS_SCRIPT") &>>"$LOG_FILE"; then
+        if [[ -f "$tmpdir/smbios.bin" ]]; then
+            $ROOT_ESC mv "$tmpdir/smbios.bin" "$target" && \
+            $ROOT_ESC chmod 0644 "$target" && \
+            fmtr::log "Generated smbios.bin at $target"
+        else
+            fmtr::error "SMBIOS.py ran but did not produce smbios.bin"
+            rm -rf "$tmpdir"
+            return 1
+        fi
+    else
+        fmtr::error "SMBIOS.py failed (check $LOG_FILE)"
+        rm -rf "$tmpdir"
+        return 1
+    fi
+
+    rm -rf "$tmpdir"
+    return 0
+}
+
+# Check that all required files exist before deploying
+check_prerequisites() {
+    local ok=0
+
+    fmtr::info "Checking prerequisites..."
+
+    # Check patched QEMU binary
+    if [[ ! -x "$OUT_DIR/emulator/bin/qemu-system-x86_64" ]]; then
+        fmtr::error "Patched QEMU binary not found at: $OUT_DIR/emulator/bin/qemu-system-x86_64"
+        fmtr::error "  ➜ Run option [2] 'QEMU (Patched) Setup' first."
+        ok=1
+    else
+        dbg::step "✓ Patched QEMU binary found"
+    fi
+
+    # Check OVMF firmware files
+    if [[ ! -f "$OUT_DIR/firmware/OVMF_CODE.fd" ]]; then
+        fmtr::error "OVMF_CODE.fd not found at: $OUT_DIR/firmware/OVMF_CODE.fd"
+        fmtr::error "  ➜ Run option [3] 'EDK2 (Patched) Setup' first."
+        ok=1
+    else
+        dbg::step "✓ OVMF_CODE.fd found"
+    fi
+
+    if [[ ! -f "$OUT_DIR/firmware/OVMF_VARS.fd" ]]; then
+        fmtr::error "OVMF_VARS.fd not found at: $OUT_DIR/firmware/OVMF_VARS.fd"
+        fmtr::error "  ➜ Run option [3] 'EDK2 (Patched) Setup' first."
+        ok=1
+    else
+        dbg::step "✓ OVMF_VARS.fd found"
+    fi
+
+    # Generate smbios.bin if needed
+    generate_smbios || ok=1
+
+    if [[ ! -f "$OUT_DIR/firmware/smbios.bin" ]]; then
+        fmtr::warn "smbios.bin not found — --qemu-commandline smbios flag will be skipped."
+        SMBIOS_AVAILABLE=0
+    else
+        dbg::step "✓ smbios.bin found"
+        SMBIOS_AVAILABLE=1
+    fi
+
+    # Check libvirtd is running
+    if ! systemctl is-active --quiet libvirtd.socket 2>/dev/null && \
+       ! systemctl is-active --quiet libvirtd.service 2>/dev/null; then
+        fmtr::error "libvirtd is not running! Start it with: sudo systemctl start libvirtd.socket"
+        ok=1
+    else
+        dbg::step "✓ libvirtd is running"
+    fi
+
+    # Check default network
+    if ! $ROOT_ESC virsh net-info default &>/dev/null; then
+        fmtr::warn "Default libvirt network not found. Network may not work."
+    else
+        dbg::step "✓ Default libvirt network available"
+    fi
+
+    return $ok
 }
 
 configure_xml() {
     if $ROOT_ESC virsh dominfo "$DOMAIN_NAME" >/dev/null 2>&1; then
         fmtr::fatal "Domain '$DOMAIN_NAME' already exists. Please delete it before running this script."
+        fmtr::info "  To remove it: sudo virsh undefine '$DOMAIN_NAME' --nvram"
         return 1
     fi
+
+    # Run prerequisite checks
+    check_prerequisites || {
+        fmtr::fatal "Prerequisite checks failed. Please resolve the issues above before deploying."
+        return 1
+    }
 
     ################################################################################
     #
@@ -573,7 +736,7 @@ configure_xml() {
         #   - https://www.qemu.org/docs/master/system/qemu-manpage.html#hxtool-4
         #
 
-        --qemu-commandline="-smbios file=/opt/AutoVirt/firmware/smbios.bin"
+        $(if (( SMBIOS_AVAILABLE )); then echo "--qemu-commandline=-smbios file=/opt/AutoVirt/firmware/smbios.bin"; fi)
 
 
 
@@ -585,19 +748,62 @@ configure_xml() {
         #
 
         --noautoconsole
-        --wait
+        --wait 0
     )
     # https://man.archlinux.org/man/virt-install.1
     # sudo virt-install --features help
 
-    # TODO: Figure out weird boot hang freeze
+    # Debug: dump the full virt-install command
+    dbg::step "virt-install command:"
+    if [[ "${DEBUG:-0}" == "1" ]]; then
+        printf '  %s\n' "${args[@]}" >> "$LOG_FILE"
+        fmtr::info "[DEBUG] Full args written to $LOG_FILE"
+    fi
 
-    $ROOT_ESC virt-install "${args[@]}" &>> "$LOG_FILE"
+    fmtr::info "Running virt-install... (this may take a moment)"
 
-    # $ROOT_ESC virt-install "${args[@]}" --print-xml > /tmp/AutoVirt.xml &>> "$LOG_FILE"
+    # Capture stderr separately so we can show errors to the user
+    local virt_stderr
+    virt_stderr=$(mktemp) || { fmtr::error "Failed to create temp file"; return 1; }
 
-    # virt-manager --connect qemu:///system --show-domain-console "$DOMAIN_NAME" &>> "$LOG_FILE"
+    $ROOT_ESC virt-install "${args[@]}" >>"$LOG_FILE" 2>"$virt_stderr"
+    local rc=$?
+
+    # Always append stderr to log
+    cat "$virt_stderr" >> "$LOG_FILE"
+
+    if [[ $rc -ne 0 ]]; then
+        fmtr::error "virt-install FAILED (exit code: $rc)!"
+        fmtr::error "─── Error output ───"
+        while IFS= read -r line; do
+            [[ -n "$line" ]] && fmtr::error "  $line"
+        done < "$virt_stderr"
+        fmtr::error "────────────────────"
+        fmtr::error "Full log: $LOG_FILE"
+        rm -f "$virt_stderr"
+        return 1
+    fi
+
+    rm -f "$virt_stderr"
+
+    fmtr::log "VM '$DOMAIN_NAME' created successfully!"
+
+    # Verify the domain was actually defined
+    if $ROOT_ESC virsh dominfo "$DOMAIN_NAME" &>/dev/null; then
+        fmtr::log "✓ Domain '$DOMAIN_NAME' is registered in libvirt."
+        fmtr::info "Open virt-manager to see it, or run: sudo virsh list --all"
+    else
+        fmtr::error "virt-install exited successfully but domain '$DOMAIN_NAME' was NOT found in libvirt!"
+        fmtr::error "Check the log: $LOG_FILE"
+        return 1
+    fi
 }
 
-system_info
-configure_xml
+# Enable debug mode with: DEBUG=1 ./modules/deploy.sh
+fmtr::info "Starting VM deployment..."
+[[ "${DEBUG:-0}" == "1" ]] && fmtr::warn "Debug mode is ON — extra logging enabled."
+
+system_info || { fmtr::fatal "Failed to gather system information."; exit 1; }
+configure_xml || { fmtr::fatal "VM deployment failed."; exit 1; }
+
+fmtr::log "Deploy completed successfully."

@@ -285,13 +285,13 @@ if prmt::yes_or_no "$(fmtr::ask 'Configure GPU PT/VFIO now?')"; then
 fi
 
 # Prompt 3 - Rebuild bootloader config?
-if [[ "$BOOTLOADER_TYPE" != "grub" ]]; then
-    fmtr::log "Detected $BOOTLOADER_TYPE; no bootloader rebuild required (ensure config is regenerated if using a tool)."
+if [[ "$BOOTLOADER_TYPE" == "systemd-boot" ]]; then
+    fmtr::log "Detected systemd-boot; no bootloader rebuild required (config is applied directly)."
 elif (( ! BOOTLOADER_CHANGED )); then
-    fmtr::log "No changes detected in GRUB config; skipping rebuild prompt."
-elif prmt::yes_or_no "$(fmtr::ask 'Proceed with rebuilding GRUB bootloader config?')"; then
-    rebuild_bootloader || { fmtr::log "Failed to update GRUB configuration."; exit 1; }
+    fmtr::log "No changes detected in bootloader config; skipping rebuild prompt."
+elif prmt::yes_or_no "$(fmtr::ask "Proceed with rebuilding $BOOTLOADER_TYPE bootloader config?")"; then
+    rebuild_bootloader || { fmtr::log "Failed to update bootloader configuration."; exit 1; }
     fmtr::warn "REBOOT required for changes to take effect"
 else
-    fmtr::warn "Proceeding without updating GRUB bootloader."
+    fmtr::warn "Proceeding without updating bootloader."
 fi
