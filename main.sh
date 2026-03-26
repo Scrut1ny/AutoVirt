@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 
+# Resolve the script's own directory so relative paths work from anywhere
+SCRIPT_DIR="$(cd "$(dirname "$(realpath "${BASH_SOURCE[0]}")")" && pwd)"
+cd "$SCRIPT_DIR" || { echo "Failed to cd to script directory: $SCRIPT_DIR"; exit 1; }
+
 source ./utils.sh || { echo "Failed to load utilities module!"; exit 1; }
 
 check_non_root() {
