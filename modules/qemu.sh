@@ -300,11 +300,16 @@ spoof_smbios() {
       chipset_file="hw/i386/fw_cfg.c"
       ;;
     *)
-      fmtr::warn "Unsupported QEMU version: $QEMU_TAG"
+      fmtr::warn "Unsupported QEMU version: $QEMU_TAG — skipping SMBIOS spoofing."
+      return 1
       ;;
   esac
 
+  [[ -f "$chipset_file" ]] || { fmtr::error "Chipset file not found: $chipset_file"; return 1; }
+
   local manufacturer=$($ROOT_ESC dmidecode --string processor-manufacturer)
+  [[ -n "$manufacturer" ]] || { fmtr::error "Failed to get processor manufacturer from dmidecode"; return 1; }
+
   sed -i "$chipset_file" -e "s/smbios_set_defaults(\"[^\"]*\",/smbios_set_defaults(\"${manufacturer}\",/"
 
   # TODO: Implement smbios.bin spoofer
