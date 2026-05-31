@@ -142,6 +142,7 @@ patch_qemu() {
 
 spoof_models() {
     local ide="hw/ide/core.c"
+    local atapi="hw/ide/atapi.c"
     local nvme="hw/nvme/ctrl.c"
 
     local ide_cd_models=(
@@ -208,7 +209,12 @@ spoof_models() {
     local new_ide_cfata_model=$(get_random_element "${ide_cfata_models[@]}")
     local new_default_model=$(get_random_element "${default_models[@]}")
 
+    local new_atapi_vendor="${new_ide_cd_model%% *}"
+    local new_atapi_model="${new_ide_cd_model#* }"
+
     sed -i "$ide" -Ee "s/\"HL-DT-ST BD-RE WH16NS60\"/\"${new_ide_cd_model}\"/"
+    sed -i "$atapi" -Ee "s/\"Samsung\"/\"${new_atapi_vendor}\"/"
+    sed -i "$atapi" -Ee "s/\"DVD-ROM\"/\"${new_atapi_model}\"/"
     sed -i "$ide" -Ee "s/\"Hitachi HMS360404D5CF00\"/\"${new_ide_cfata_model}\"/"
     sed -i "$ide" -Ee "s/\"Samsung SSD 980 500GB\"/\"${new_default_model}\"/"
     sed -i "$nvme" -Ee "s/\"NVMe Ctrl\"/\"${new_default_model}\"/"
