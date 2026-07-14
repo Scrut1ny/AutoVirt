@@ -1,6 +1,88 @@
 #!/usr/bin/env bash
 
-source ./utils.sh || { echo "Failed to load utilities module!"; exit 1; }
+source "$(dirname "$0")/../utils.sh" || { echo "Failed to load utilities module!"; exit 1; }
+
+readonly AUTOVIRT_DIR="/opt/AutoVirt"
+
+check_prerequisites() {
+    local failed=0
+
+    fmtr::info "Checking prerequisites..."
+
+    # Check patched QEMU binary
+    if [[ ! -x "$AUTOVIRT_DIR/emulator/bin/qemu-system-x86_64" ]]; then
+        fmtr::error "Patched QEMU not found at $AUTOVIRT_DIR/emulator/bin/qemu-system-x86_64"
+        fmtr::error "Please run 'QEMU (Patched) Setup' first (Option 2)."
+        failed=1
+    fi
+
+    # Check OVMF firmware files
+    if [[ ! -f "$AUTOVIRT_DIR/firmware/OVMF_CODE.fd" ]]; then
+        fmtr::error "OVMF_CODE.fd not found at $AUTOVIRT_DIR/firmware/"
+        fmtr::error "Please run 'EDK2 (Patched) Setup' first (Option 3)."
+        failed=1
+    fi
+
+    if [[ ! -f "$AUTOVIRT_DIR/firmware/OVMF_VARS.fd" ]]; then
+        fmtr::error "OVMF_VARS.fd not found at $AUTOVIRT_DIR/firmware/"
+        fmtr::error "Please run 'EDK2 (Patched) Setup' first (Option 3)."
+        failed=1
+    fi
+
+    # Check smbios.bin - auto-generate if missing
+    if [[ ! -f "$AUTOVIRT_DIR/firmware/smbios.bin" ]]; then
+        fmtr::warn "smbios.bin not found. Generating now..."
+        local smbios_script="$SCRIPT_DIR/resources/scripts/Linux/SMBIOS.py"
+        if [[ -f "$smbios_script" ]]; then
+            if $ROOT_ESC python3 "$smbios_script" -o "$AUTOVIRT_DIR/firmware/smbios.bin"; then
+                fmtr::log "Generated smbios.bin successfully."
+            else
+                fmtr::error "Failed to generate smbios.bin."
+                failed=1
+            fi
+        else
+            fmtr::error "SMBIOS.py not found at $smbios_script"
+            failed=1
+        fi
+    fi
+
+    # Check libvirtd is running
+    if ! systemctl is-active --quiet libvirtd 2>/dev/null; then
+        fmtr::warn "libvirtd is not running. Attempting to start..."
+        $ROOT_ESC systemctl start libvirtd || {
+            fmtr::error "Failed to start libvirtd. Please run 'Virtualization Setup' first (Option 1)."
+            failed=1
+        }
+    fi
+
+    # Check AutoVirt-Router network exists and is active
+    if ! $ROOT_ESC virsh net-info AutoVirt-Router &>/dev/null; then
+        fmtr::warn "AutoVirt-Router network not found. Please run 'Virtualization Setup' first (Option 1)."
+        failed=1
+    elif ! $ROOT_ESC virsh net-info AutoVirt-Router 2>/dev/null | grep -q "Active:.*yes"; then
+        fmtr::info "Starting AutoVirt-Router network..."
+        $ROOT_ESC virsh net-start AutoVirt-Router &>/dev/null || {
+            fmtr::warn "Failed to start AutoVirt-Router network."
+        }
+    fi
+
+    # Check firewall backend for Arch
+    if [[ "$DISTRO" == "Arch" ]]; then
+        local network_conf="/etc/libvirt/network.conf"
+        if [[ -f "$network_conf" ]] && ! grep -q '^firewall_backend = "iptables"' "$network_conf"; then
+            fmtr::warn "libvirt firewall backend may need to be set to iptables for proper networking."
+            fmtr::info "Edit /etc/libvirt/network.conf and set: firewall_backend = \"iptables\""
+        fi
+    fi
+
+    if (( failed )); then
+        fmtr::fatal "Prerequisite check failed. Please resolve the issues above."
+        return 1
+    fi
+
+    fmtr::log "All prerequisites satisfied."
+    return 0
+}
 
 system_info() {
     # Domain Name
@@ -11,13 +93,38 @@ system_info() {
     HOST_CORES_PER_SOCKET=$(LC_ALL=C lscpu | sed -n 's/^Core(s) per socket:[[:space:]]*//p')
     HOST_THREADS_PER_CORE=$(LC_ALL=C lscpu | sed -n 's/^Thread(s) per core:[[:space:]]*//p')
 
+    # Validate CPU topology with fallback defaults
+    : "${HOST_CORES_PER_SOCKET:=1}"
+    : "${HOST_THREADS_PER_CORE:=1}"
+    if ! [[ "$HOST_CORES_PER_SOCKET" =~ ^[0-9]+$ ]] || (( HOST_CORES_PER_SOCKET < 1 )); then
+        HOST_CORES_PER_SOCKET=1
+    fi
+    if ! [[ "$HOST_THREADS_PER_CORE" =~ ^[0-9]+$ ]] || (( HOST_THREADS_PER_CORE < 1 )); then
+        HOST_THREADS_PER_CORE=1
+    fi
+
     # MAC Address (Uses host's OUI)
-    UPLINK_IFACE=$(nmcli -t device show | awk -F: '
-    /^GENERAL.DEVICE/ {dev=$2}
-    /^GENERAL.TYPE/   {type=$2}
-    /^IP4.GATEWAY/ && $2!="" && type!="wireguard" {print dev; exit}
-    ')
-    OUI=$(cat /sys/class/net/"$UPLINK_IFACE"/address | awk -F: '{print $1 ":" $2 ":" $3}')
+    UPLINK_IFACE=""
+    if command -v nmcli &>/dev/null; then
+        UPLINK_IFACE=$(nmcli -t device show | awk -F: '
+        /^GENERAL.DEVICE/ {dev=$2}
+        /^GENERAL.TYPE/   {type=$2}
+        /^IP4.GATEWAY/ && $2!="" && type!="wireguard" {print dev; exit}
+        ')
+    fi
+
+    if [[ -n "$UPLINK_IFACE" && -f "/sys/class/net/$UPLINK_IFACE/address" ]]; then
+        OUI=$(cat "/sys/class/net/$UPLINK_IFACE/address" | awk -F: '{print $1 ":" $2 ":" $3}')
+    else
+        # Fallback: derive OUI from default gateway's MAC via ARP table
+        local gw
+        gw=$(ip route show default 2>/dev/null | awk '/default/ {print $3}')
+        if [[ -n "$gw" ]]; then
+            OUI=$(awk -v gw="$gw" '$1==gw{print $4}' /proc/net/arp 2>/dev/null | awk -F: '{print $1 ":" $2 ":" $3}')
+        fi
+        # Final fallback: use a locally-administered OUI
+        : "${OUI:=$(printf '02:%02x:%02x:%02x' $((RANDOM%256)) $((RANDOM%256)) $((RANDOM%256)))}"
+    fi
     RANDOM_MAC="$OUI:$(printf '%02x:%02x:%02x' $((RANDOM%256)) $((RANDOM%256)) $((RANDOM%256)))"
 
     # Random 20-char hex serial (A-F0-9)
@@ -587,19 +694,30 @@ configure_xml() {
         #
 
         --noautoconsole
-        --wait
+        --wait 0
     )
     # https://man.archlinux.org/man/virt-install.1
     # sudo virt-install --features help
 
-    # TODO: Figure out weird boot hang freeze
+    fmtr::info "Launching virt-install..."
+    if $ROOT_ESC virt-install "${args[@]}" &>> "$LOG_FILE"; then
+        fmtr::log "virt-install completed successfully."
+    else
+        fmtr::error "virt-install failed. Check $LOG_FILE for details."
+        fmtr::error "Common causes: missing firmware files, permission issues, or invalid ISO path."
+        return 1
+    fi
 
-    $ROOT_ESC virt-install "${args[@]}" &>> "$LOG_FILE"
-
-    # $ROOT_ESC virt-install "${args[@]}" --print-xml > /tmp/AutoVirt.xml &>> "$LOG_FILE"
-
-    # virt-manager --connect qemu:///system --show-domain-console "$DOMAIN_NAME" &>> "$LOG_FILE"
+    # Verify domain was actually registered
+    if $ROOT_ESC virsh dominfo "$DOMAIN_NAME" &>/dev/null; then
+        fmtr::log "Domain '$DOMAIN_NAME' is registered and ready."
+    else
+        fmtr::error "Domain '$DOMAIN_NAME' was not registered in libvirt."
+        fmtr::error "Check $LOG_FILE for details."
+        return 1
+    fi
 }
 
-system_info
-configure_xml
+check_prerequisites || exit 1
+system_info || { fmtr::error "system_info failed."; exit 1; }
+configure_xml || { fmtr::error "configure_xml failed."; exit 1; }
