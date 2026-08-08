@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR" || { echo "Failed to change to script directory: $SCRIPT_DIR"; exit 1; }
+
 source ./utils.sh || { echo "Failed to load utilities module!"; exit 1; }
 
 
@@ -103,8 +106,8 @@ main_menu() {
     "QEMU (Patched) Setup|qemu.sh"
     "EDK2 (Patched) Setup|edk2.sh"
     "GPU Passthrough Setup|vfio.sh"
-    "Kernel (Patched) Setup|"
-    "Looking Glass Setup|"
+    "Kernel (Patched) Setup|kernel.sh"
+    "Looking Glass Setup|lg.sh"
     "Deploy Auto/Unattended XML|deploy.sh"
   )
 
@@ -138,7 +141,7 @@ main_menu() {
 
       fmtr::box_text "$label"
       if [[ -n "$script" ]]; then
-        ./modules/"$script"
+        "$SCRIPT_DIR/modules/$script"
       else
         fmtr::warn "This module isn't ready yet."
       fi
