@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-source ./utils.sh || { echo "Failed to load utilities module!"; exit 1; }
+source "$(dirname "$0")/../utils.sh" || { echo "Failed to load utilities module!"; exit 1; }
 
 
 
@@ -346,13 +346,15 @@ if prmt::yes_or_no "$(fmtr::ask 'Configure GPU PT/VFIO now?')"; then
 fi
 
 # Prompt 3 - Rebuild bootloader config?
-if [[ "$BOOTLOADER_TYPE" != "grub" ]]; then
-    fmtr::log "Detected $BOOTLOADER_TYPE; no bootloader rebuild required (ensure config is regenerated if using a tool)."
+if [[ "$BOOTLOADER_TYPE" == "systemd-boot" ]]; then
+    fmtr::log "Detected systemd-boot; no explicit rebuild required (entries are read directly)."
+elif [[ "$BOOTLOADER_TYPE" != "grub" && "$BOOTLOADER_TYPE" != "limine" ]]; then
+    fmtr::log "Detected $BOOTLOADER_TYPE; no supported rebuild method available."
 elif (( ! BOOTLOADER_CHANGED )); then
-    fmtr::log "No changes detected in GRUB config; skipping rebuild prompt."
-elif prmt::yes_or_no "$(fmtr::ask 'Proceed with rebuilding GRUB bootloader config?')"; then
-    rebuild_bootloader || { fmtr::log "Failed to update GRUB configuration."; exit 1; }
+    fmtr::log "No changes detected in $BOOTLOADER_TYPE config; skipping rebuild prompt."
+elif prmt::yes_or_no "$(fmtr::ask "Proceed with rebuilding $BOOTLOADER_TYPE bootloader config?")"; then
+    rebuild_bootloader || { fmtr::log "Failed to update $BOOTLOADER_TYPE configuration."; exit 1; }
     fmtr::warn "REBOOT required for changes to take effect"
 else
-    fmtr::warn "Proceeding without updating GRUB bootloader."
+    fmtr::warn "Proceeding without updating $BOOTLOADER_TYPE bootloader."
 fi

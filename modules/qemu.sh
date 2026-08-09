@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-source ./utils.sh || { echo "Failed to load utilities module!"; exit 1; }
+source "$(dirname "$0")/../utils.sh" || { echo "Failed to load utilities module!"; exit 1; }
 
 
 
@@ -126,6 +126,7 @@ patch_qemu() {
 
   fmtr::info "Applying dynamic modifications..."
   spoof_models
+  spoof_usb_serials
   spoof_acpi
   spoof_smbios
 }
@@ -212,6 +213,29 @@ spoof_models() {
     sed -i "$ide" -Ee "s/\"Hitachi HMS360404D5CF00\"/\"${new_ide_cfata_model}\"/"
     sed -i "$ide" -Ee "s/\"Samsung SSD 980 500GB\"/\"${new_default_model}\"/"
     sed -i "$nvme" -Ee "s/\"NVMe Ctrl\"/\"${new_default_model}\"/"
+}
+
+
+spoof_usb_serials() {
+    local usb_dir="hw/usb"
+
+    local serial_patterns=(
+      "STRING_SERIALNUMBER" "STR_SERIALNUMBER" "STR_SERIAL_MOUSE"
+      "STR_SERIAL_TABLET" "STR_SERIAL_KEYBOARD" "STR_SERIAL_COMPAT"
+    )
+
+    for file in "$usb_dir"/*.c; do
+      [ -f "$file" ] || continue
+      for pat in "${serial_patterns[@]}"; do
+        grep -n "\[\s*${pat}\s*\]\s*=\s*\"[^\"]*\"" "$file" 2>/dev/null | cut -d: -f1 | while read -r lineno; do
+          local serial
+          serial=$(LC_ALL=C tr -dc 'A-Z0-9' </dev/urandom | head -c10)
+          sed -E -i "${lineno}s/(\[\s*${pat}\s*\]\s*=\s*\")[^\"]*(\")/\1${serial}\2/" "$file"
+        done
+      done
+    done
+
+    fmtr::log "Spoofed USB device serial numbers."
 }
 
 

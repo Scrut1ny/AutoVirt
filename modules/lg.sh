@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-source ./utils.sh || { echo "Failed to load utilities module!"; exit 1; }
+source "$(dirname "$0")/../utils.sh" || { echo "Failed to load utilities module!"; exit 1; }
 
 readonly SRC_DIR="$(pwd)/src"
 readonly LG_URL="https://looking-glass.io/artifact/stable/source"
@@ -93,7 +93,7 @@ install_looking_glass() {
   } &>> "$LOG_FILE"
 
   fmtr::info "Cleaning up..."
-  cd ../../../ && rm -rf looking-glass-$LG_VERSION/
+  cd "$SRC_DIR" && rm -rf looking-glass-$LG_VERSION/
 
 }
 
@@ -168,6 +168,7 @@ main() {
   install_req_pkgs "LG"
   install_looking_glass
   configure_ivshmem_shmem
+  configure_ivshmem_kvmfr
   
 }
 
