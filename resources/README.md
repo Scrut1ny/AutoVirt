@@ -115,23 +115,23 @@ amdgpu.sg_display=0
 ## 🔩 Hardware
 
 <details>
-<summary>Bypassing HDCP</summary>
+<summary>HDCP</summary>
 
 #### HDCP (High-bandwidth Digital Content Protection) Stuff
 - [Wikipedia - HDCP](https://en.wikipedia.org/wiki/High-bandwidth_Digital_Content_Protection)
 - [NVIDIA - To verify if your system is HDCP-capable](https://www.nvidia.com/content/Control-Panel-Help/vLatest/en-us/mergedProjects/Display/To_verify_if_your_system_is_HDCP-capable.htm)
 
-## Bypassing HDCP Hardware/Software Diagram:
-![bypass](https://github.com/Scrut1ny/Hypervisor-Phantom/assets/53458032/589b0f88-f14b-44d8-bf1c-225df4d01e54)
+## HDCP Hardware/Software Diagram:
+![setup](https://github.com/Scrut1ny/Hypervisor-Phantom/assets/53458032/589b0f88-f14b-44d8-bf1c-225df4d01e54)
 
-## Bypass Kits
+## Kits
 
-#### Expensive Bypass Kit (Recommended):
+#### Expensive Kit (Recommended):
 - 1x2 HDMI Splitter <> [U9/ViewHD - VHD-1X2MN3D](https://www.amazon.com/dp/B086JKRSW1) - `~$18.00`
 - EDID Emulator <> [4K-EWB - HDMI 2.1 4K EDID Emulator](https://www.amazon.com/dp/B0DB7YDFD6) - `~$25.00`
 - USB HDMI Capture Card <> [Elgato HD60 X](https://www.amazon.com/dp/B09V1KJ3J4) - `~$160.00`
 
-#### Cheap Bypass Kit (Not recommended):
+#### Cheap Kit (Not recommended):
 - 1x2 HDMI Splitter <> [OREI](https://www.amazon.com/dp/B005HXFARS) - `~$13.00`
 - EDID Emulator <> [EVanlak](https://www.amazon.com/dp/B07YMTKJCR) - `~$7.00`
 - USB HDMI Capture Card <> [AXHDCAP](https://www.amazon.com/dp/B0C2MDTY8P) - `~$9.00`
