@@ -10,7 +10,7 @@ readonly ROOT_DIR="$(pwd)"
 readonly OUT_DIR="/opt/AutoVirt"
 
 readonly QEMU_URI="https://github.com/qemu/qemu.git"
-readonly QEMU_TAG="v11.0.3"
+readonly QEMU_TAG="v11.1.3"
 
 readonly QEMU_PATCH="$(pwd)/patches/QEMU/${CPU_MANUFACTURER}-${QEMU_TAG}.patch"
 
