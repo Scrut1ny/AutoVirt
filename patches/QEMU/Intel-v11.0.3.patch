@@ -45,10 +45,10 @@ index 4b37405..1506879 100644
      /* TODO: extra fields need to be added to support revisions above rev6 */
      assert(f->rev == 6);
 diff --git a/hw/acpi/pcihp.c b/hw/acpi/pcihp.c
-index 87162ff..b78c4bb 100644
+index 87162ff..d54dde0 100644
 --- a/hw/acpi/pcihp.c
 +++ b/hw/acpi/pcihp.c
-@@ -699,6 +699,83 @@ void build_append_pcihp_resources(Aml *scope /* \\_SB.PCI0 */,
+@@ -699,6 +699,82 @@ void build_append_pcihp_resources(Aml *scope /* \\_SB.PCI0 */,
      aml_append(scope, dev);
  }
  
@@ -89,8 +89,7 @@ index 87162ff..b78c4bb 100644
 +
 +        case 5:
 +            // Slot 5: USB XHCI (QEMU default often)
-+            if (func == 0) sprintf(name, "XHC1");
-+            else sprintf(name, "XHC%X", func);
++            sprintf(name, "XHC%X", func + 1);
 +            break;
 +
 +        case 6:
@@ -101,8 +100,8 @@ index 87162ff..b78c4bb 100644
 +
 +        case 29:
 +            // Slot 29 (0x1D): USB EHCI (Intel Standard)
-+            if (func == 0) sprintf(name, "EHC1");
-+            else sprintf(name, "EHC%X", func);
++            if (func == 7) sprintf(name, "EHC1");
++            else sprintf(name, "USB%X", func + 1);
 +            break;
 +
 +        case 31:
@@ -132,7 +131,7 @@ index 87162ff..b78c4bb 100644
  bool build_append_notification_callback(Aml *parent_scope, const PCIBus *bus)
  {
      Aml *method;
-@@ -912,7 +989,11 @@ void build_append_pci_bus_devices(Aml *parent_scope, PCIBus *bus)
+@@ -912,7 +988,22 @@ void build_append_pci_bus_devices(Aml *parent_scope, PCIBus *bus)
          }
  
          /* start to compose PCI device descriptor */
@@ -140,6 +139,17 @@ index 87162ff..b78c4bb 100644
 +
 +        char mimic_name[5];
 +        get_mimic_pci_name(mimic_name, devfn);
++        for (int prior = 0; prior < devfn; prior++) {
++            char prior_name[5];
++            if (!bus->devices[prior] || is_devfn_ignored_generic(prior, bus)) {
++                continue;
++            }
++            get_mimic_pci_name(prior_name, prior);
++            if (strcmp(prior_name, mimic_name) == 0) {
++                snprintf(mimic_name, sizeof(mimic_name), "RP%02X", devfn);
++                break;
++            }
++        }
 +        dev = aml_device("%s", mimic_name);
 +
          aml_append(dev, aml_name_decl("_ADR", aml_int(adr)));
