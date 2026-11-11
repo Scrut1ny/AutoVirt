@@ -17,19 +17,19 @@
 
 #### clone
 ```sh
-git clone --depth=1 --branch "v11.0.2" "https://github.com/qemu/qemu.git"
+git clone --depth=1 --branch "v11.1.3" "https://github.com/qemu/qemu.git"
 ```
 
 #### diff
 ```sh
 git add .
 
-git diff HEAD > "v11.0.2.patch"
+git diff HEAD > "v11.1.3.patch"
 ```
 
 #### patch
 ```sh
-git apply < "v11.0.2.patch"
+git apply < "v11.1.3.patch"
 ```
 
 #### (re)build & install
@@ -50,17 +50,17 @@ sudo ninja -C build install
 
 #### clone
 ```sh
-git clone --depth=1 --branch "edk2-stable202605" "https://github.com/tianocore/edk2.git"
+git clone --depth=1 --branch "edk2-stable202608" "https://github.com/tianocore/edk2.git"
 ```
 
 #### diff
 ```sh
-git diff HEAD > "edk2-stable202605.patch"
+git diff HEAD > "edk2-stable202608.patch"
 ```
 
 #### patch
 ```sh
-git apply < "edk2-stable202605.patch"
+git apply < "edk2-stable202608.patch"
 ```
 
 
